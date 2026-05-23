@@ -1,0 +1,206 @@
+#+TITLE: org-tasklet
+
+* 定位
+
+org-tasklet 是一个轻量的 Org todo list 跟踪插件，面向希望用纯 Org 文件管理收件箱、任务和项目的用户。
+
+设计目标：
+
+- 保留 inbox，但不强制线性处理流程。
+- 保留项目任务的 ~TODO -> NEXT -> DONE/CNCL~ 状态流。
+- 非项目任务只需要 ~TODO -> DONE/CNCL~ ，不要求 ~NEXT~ 。
+- 移除 ~WAIT~ ，避免维护很少使用的状态。
+- 保留 schedule、deadline、agenda、年度归档、浏览器稍后阅读、mode-line inbox 数量。
+- 项目只使用 Org 树结构，不引入 DAG、依赖图或额外数据库。
+- 插件按模块懒加载，避免把所有功能放进 Emacs 启动路径。
+
+* 设计来源
+
+org-tasklet 的分类语义和常用快捷键参考了 [[https://github.com/Trevoke/org-gtd.el][Trevoke/org-gtd.el]]。
+org-gtd.el 是一个完整的 GTD 实现，提供 capture、clarify、organize、engage、review 等流程，
+并支持项目依赖、内置视图、org-protocol 集成和 native compilation。
+
+本项目不是 org-gtd.el 的完整复刻，而是一个更轻量的替代实现：
+
+- 保留 inbox、任务分类、项目 ~NEXT~ 状态流、agenda 和归档这些日常高频功能。
+- 移除线性 process/clarify 流程，改为在当前 Org item 上直接执行整理命令。
+- 移除 ~WAIT~ 和项目依赖图，项目只使用普通 Org 树结构。
+- 不写入 ~ORG_GTD~ 系列元数据，尽量保持数据文件接近普通 Org 文件。
+- 入口懒加载，避免为了任务系统显著增加 Emacs 启动成本。
+
+* 文件结构
+
+默认数据目录是用户主目录下的 ~org-tasklet~ 目录；可以通过 ~org-tasklet-directory~ 修改。
+
+- ~inbox.org~ :: 临时收集区。
+- ~tasks.org~ :: 正式任务和项目。
+- ~.archive/todo_YYYY.org~ :: 年度归档文件。
+
+* 安装
+
+本地开发时可以先这样加载：
+
+#+begin_src emacs-lisp
+(add-to-list 'load-path "/path/to/org-tasklet")
+(require 'org-tasklet)
+
+;; 按需设置任务数据目录；默认值是 "~/org-tasklet"。
+(setq org-tasklet-directory "~/org-tasklet")
+(org-tasklet-setup)
+(org-tasklet-mode 1)
+#+end_src
+
+只要不调用 ~org-tasklet-mode~ 或其他命令，入口文件不会主动扫描任务文件。
+
+* 性能设计
+
+入口文件只加载 ~org-tasklet-core.el~ 和少量 mode-line 代码。下面这些模块都会等到命令被调用，或打开对应数据文件时才加载：
+
+- ~org-tasklet-capture.el~ :: 捕获和打开任务文件。
+- ~org-tasklet-agenda.el~ :: 日程视图。
+- ~org-tasklet-triage.el~ :: 收件箱整理。
+- ~org-tasklet-project.el~ :: 项目状态刷新。
+- ~org-tasklet-archive.el~ :: 年度归档。
+- ~org-tasklet-protocol.el~ :: 浏览器协议捕获。
+
+当前参考基准：
+
+#+begin_src text
+require-org-tasklet=0.009s~0.013s
+features-added=5
+loaded-org=nil
+loaded-org-agenda=nil
+loaded-org-capture=nil
+loaded-org-protocol=nil
+#+end_src
+
+可以随时重新测量：
+
+#+begin_src shell
+cd /path/to/org-tasklet
+make measure
+#+end_src
+
+后续继续优化时，优先保持这几条约束：
+
+- 入口文件不要直接 ~(require 'org)~ 。
+- mode-line 只统计收件箱，且默认不启用定时器。
+- 项目刷新使用显式命令，不默认挂到每次保存或 TODO 状态变化。
+- 浏览器协议只在调用 ~org-tasklet-register-org-protocol~ 时加载 ~org-protocol~ 。
+
+* 常用命令
+
+- ~M-x org-tasklet-capture-inbox~ :: 快速捕获到 inbox。
+- ~M-x org-tasklet-capture-read-later~ :: 捕获稍后阅读链接。
+- ~M-x org-tasklet-triage-current-item~ :: 处理光标所在的当前 inbox item。
+- ~M-x org-tasklet-triage~ :: 打开 inbox 文件。
+- ~M-x org-tasklet-engage~ :: 打开总览 agenda。
+- ~M-x org-tasklet-show-next~ :: 只看项目下一步。
+- ~M-x org-tasklet-refresh-project~ :: 刷新当前项目的 ~NEXT~ 。
+- ~M-x org-tasklet-refresh-all-projects~ :: 刷新 ~tasks.org~ 中所有项目。
+- ~M-x org-tasklet-archive-done~ :: 把 ~DONE~ 和 ~CNCL~ 条目归档到年度 datetree。
+- ~M-x org-tasklet-register-org-protocol~ :: 注册浏览器捕获协议。
+- ~M-x org-tasklet-help~ :: 查看分类整理规则、常用命令和预编译注意事项。
+
+* inbox 整理
+
+默认打开 ~inbox.org~ 时保持普通 Org 编辑体验，不接管字符键。
+需要处理条目时，把光标放在该 Org subtree 的标题或正文里，调用 ~M-x org-tasklet-triage-current-item~ 。
+该命令只处理当前 item，随后立即结束，不保留额外状态，也不会进入线性 process 流程。
+
+整理流程参考 org-gtd 的分类语义，但只使用 Org 原生结构：
+
+- ~Action~ :: 单步任务，移动到 ~tasks.org~ 的 ~Actions~ 顶层分类下，并保持 ~TODO~ 。
+- ~Project~ :: 多步项目，移动到 ~Projects~ 顶层分类下；项目根标题不强制 TODO，直接子任务使用 ~TODO/NEXT~ 状态流。
+- ~Add to Project~ :: 把当前 item 作为子任务追加到已有项目下，并刷新该项目的 ~NEXT~ 。
+- ~Calendar~ :: 需要出现在 agenda 的任务，移动到 ~Calendar~ ；时间、 ~SCHEDULED~ 、 ~DEADLINE~ 直接用 Org 文本编辑。
+- ~Habit~ :: 定期习惯，移动到 ~Habits~ ；写入 Org 原生 ~STYLE: habit~ 。
+- ~Tickler~ :: 有明确提醒时间、以后再看的任务，移动到 ~Tickler~ ；提醒时间直接用 Org 时间戳或排期文本维护。
+- ~Incubate~ :: 没有明确时间承诺的以后可能事项，移动到 ~Incubate~ 。
+- ~Reference~ :: 参考资料，移动到 ~Reference~ 。
+- ~Quick Action~ :: 已经立即处理完的条目，标记 ~DONE~ 后归档。
+- ~Trash~ :: 不需要的条目，标记 ~CNCL~ 后归档。
+
+tags 是整理流程的一部分。交互调用时会使用 Org 自带的 tags 编辑命令；Lisp 调用可以直接传入 tags。
+整理过程不会写入 ~ORG_GTD~ 、 ~ORG_GTD_REFILE~ 、 ~ORG_GTD_PROJECT_IDS~ 等 org-gtd 元数据。
+日期、排期、截止日期、priority、effort 这类信息保持普通 Org 文本编辑，不单独做整理菜单动作。
+
+* 项目状态流
+
+项目是 Org 树结构。标题拥有子任务时，会被当作项目。
+兼容旧数据时，手动拥有 ~TASKLET_PROJECT: t~ 的标题也能被项目命令识别，但 inbox 整理不会自动写入这个属性。
+
+~org-tasklet-refresh-project~ 只处理当前项目的直接子任务：
+
+- 如果没有 ~NEXT~ ，把第一个未完成直接子任务改为 ~NEXT~ 。
+- 如果有多个 ~NEXT~ ，只保留第一个，其余改回 ~TODO~ 。
+- 不维护依赖图，不扫描全局 DAG。
+
+* 浏览器捕获
+
+新协议建议使用 ~tasklet-capture~ ：
+
+#+begin_src js
+location.href='org-protocol://tasklet-capture://r/'+
+  encodeURIComponent(location.href)+'/'+
+  encodeURIComponent(document.title)+'/'+
+  encodeURIComponent(window.getSelection())
+#+end_src
+
+为了兼容已有浏览器脚本，插件默认也可以注册 ~gtd-capture~ 协议：
+
+#+begin_src js
+location.href='org-protocol://gtd-capture://r/'+
+  encodeURIComponent(location.href)+'/'+
+  encodeURIComponent(document.title)+'/'+
+  encodeURIComponent(window.getSelection())
+#+end_src
+
+配置里需要调用：
+
+#+begin_src emacs-lisp
+(require 'org-tasklet)
+(with-eval-after-load 'org-protocol
+  (org-tasklet-register-org-protocol))
+#+end_src
+
+如果希望确保协议立即可用，可以显式加载：
+
+#+begin_src emacs-lisp
+(require 'org-protocol)
+(org-tasklet-register-org-protocol)
+#+end_src
+
+* 预编译
+
+可以通过 ~M-x org-tasklet-help~ 在 Emacs 内查看这段说明，避免以后忘记。
+
+为了避免第一次打开新功能时临时编译卡顿，可以在插件目录执行：
+
+#+begin_src shell
+cd /path/to/org-tasklet
+make compile
+#+end_src
+
+如果 Emacs 支持 native-comp，也可以提前生成原生编译缓存：
+
+#+begin_src shell
+cd /path/to/org-tasklet
+make native-compile
+#+end_src
+
+注意事项：
+
+- 预编译只处理插件文件，不会连接或影响正在运行的 Emacs 进程。
+- 升级 Emacs、大版本切换、清理 ~eln-cache~ 后，需要重新运行 ~make native-compile~ 。
+- 修改任意 ~*.el~ 后，建议重新运行 ~make compile~ 或 ~make native-compile~ 。
+- 如果只是开发调试，先运行 ~make test~ ；测试通过后再预编译。
+
+* 测试
+
+#+begin_src shell
+cd /path/to/org-tasklet
+make test
+#+end_src
+
+测试使用 ~emacs -Q --batch~ ，不会连接正在运行的 Emacs 进程。
