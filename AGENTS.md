@@ -80,8 +80,13 @@
 ## inbox 整理
 
 不要为 inbox 引入会长期生效的整理状态，也不要接管 `m`、`d`、`c` 等普通字符键。
-整理入口应是一次性命令：把光标放在某个 Org subtree 的标题或正文里，调用 `org-tasklet-triage-current-item`，选择分类，然后只处理当前 item。
-不要再新增线性处理流程入口。
+整理入口是 `org-tasklet-triage-current-item`：
+
+- Lisp 调用（传入 type/tags/project-marker）只处理当前 item，处理完立即结束。
+- 交互调用进入连续整理：当前 buffer 不是 inbox 时自动打开 inbox 并跳到第一个 item；
+  在 inbox 内则从光标所在 item 开始。每处理完一个 item 自动激活下一个，
+  处理完末尾后回到开头补漏，直到全部完成或用户 `C-g` 退出。
+- 连续整理只存在于单次命令的执行期间，不保留跨命令状态，也不引入专门的整理 mode。
 
 分类整理规则参考 org-gtd，但实现必须保持轻量：
 
@@ -120,7 +125,7 @@ make clean && make test && make compile && make test && make native-compile && m
 当前已知基准：
 
 ```text
-make test: 23/23 passed
+make test: 26/26 passed
 require-org-tasklet: 约 0.009s 到 0.013s
 features-added=5
 loaded-org=nil
@@ -206,6 +211,9 @@ loaded-org-protocol=nil
 - `Tickler` 与 `Incubate` 会清理 TODO 状态并移动到各自分类。
 - `Quick Action` 与 `Trash` 会分别标记 `DONE`/`CNCL` 后归档。
 - 普通 Org 文件和 inbox 文件头区域不能执行当前 item 处理。
+- 连续整理从中间条目开始时，处理完末尾会回到开头补漏。
+- 连续整理中途 `C-g` 退出时，已处理条目保留结果，剩余条目原样保留在 inbox。
+- 在非 inbox buffer 交互触发连续整理时，会自动打开 inbox 并处理。
 
 新增功能时优先补 ERT 测试，并保持 `emacs -Q --batch` 可运行。
 

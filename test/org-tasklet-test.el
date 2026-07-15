@@ -416,6 +416,85 @@
       (should (string-match-p "DONE Two minute task" archive))
       (should (string-match-p "CNCL No longer needed" archive)))))
 
+(ert-deftest org-tasklet-triage-items-processes-from-current-and-wraps ()
+  (org-tasklet-test--with-temp-dir
+    (org-tasklet-ensure-files)
+    (with-current-buffer (find-file-noselect (org-tasklet-inbox-file))
+      (unwind-protect
+          (progn
+            (erase-buffer)
+            (insert "#+TODO: TODO NEXT | DONE CNCL\n\n"
+                    "* TODO First\n"
+                    "* TODO Second\n"
+                    "Body\n"
+                    "* TODO Third\n")
+            (org-mode)
+            (goto-char (point-min))
+            ;; 从中间条目开始，验证处理完末尾后回到开头补漏。
+            (re-search-forward "Body")
+            (let ((org-tasklet-triage-ask-tags nil))
+              (cl-letf (((symbol-function 'org-tasklet--read-organize-type)
+                         (lambda () 'action)))
+                (org-tasklet-triage-items))))
+        (kill-buffer)))
+    (should (= 0 (org-tasklet-inbox-count)))
+    (let ((text (org-tasklet--read-file-string (org-tasklet-tasks-file))))
+      (should (string-match-p "\\*\\* TODO First" text))
+      (should (string-match-p "\\*\\* TODO Second" text))
+      (should (string-match-p "\\*\\* TODO Third" text)))))
+
+(ert-deftest org-tasklet-triage-items-quit-stops-after-current ()
+  (org-tasklet-test--with-temp-dir
+    (org-tasklet-ensure-files)
+    (with-current-buffer (find-file-noselect (org-tasklet-inbox-file))
+      (unwind-protect
+          (progn
+            (erase-buffer)
+            (insert "#+TODO: TODO NEXT | DONE CNCL\n\n"
+                    "* TODO First\n"
+                    "* TODO Second\n")
+            (org-mode)
+            (goto-char (point-min))
+            (let ((org-tasklet-triage-ask-tags nil)
+                  (calls 0))
+              (cl-letf (((symbol-function 'org-tasklet--read-organize-type)
+                         (lambda ()
+                           (setq calls (1+ calls))
+                           (if (> calls 1)
+                               (signal 'quit nil)
+                             'action))))
+                (org-tasklet-triage-items))))
+        (kill-buffer)))
+    ;; 第一个 item 已处理，第二个 item 在 C-g 时保留在 inbox。
+    (should (= 1 (org-tasklet-inbox-count)))
+    (should (string-match-p "\\*\\* TODO First"
+                            (org-tasklet--read-file-string
+                             (org-tasklet-tasks-file))))
+    (should (string-match-p "\\* TODO Second"
+                            (org-tasklet--read-file-string
+                             (org-tasklet-inbox-file))))))
+
+(ert-deftest org-tasklet-triage-items-opens-inbox-from-other-buffer ()
+  (org-tasklet-test--with-temp-dir
+    (org-tasklet-ensure-files)
+    (with-temp-file (org-tasklet-inbox-file)
+      (insert "#+TODO: TODO NEXT | DONE CNCL\n\n"
+              "* TODO Only item\n"))
+    (unwind-protect
+        (with-temp-buffer
+          (let ((org-tasklet-triage-ask-tags nil))
+            (cl-letf (((symbol-function 'org-tasklet--read-organize-type)
+                       (lambda () 'action)))
+              (org-tasklet-triage-items)))
+          ;; 命令应已切换到 inbox buffer。
+          (should (org-tasklet-inbox-buffer-p)))
+      (when (get-file-buffer (org-tasklet-inbox-file))
+        (kill-buffer (get-file-buffer (org-tasklet-inbox-file)))))
+    (should (= 0 (org-tasklet-inbox-count)))
+    (should (string-match-p "\\*\\* TODO Only item"
+                            (org-tasklet--read-file-string
+                             (org-tasklet-tasks-file))))))
+
 (ert-deftest org-tasklet-registers-new-and-legacy-protocols ()
   (let ((org-protocol-protocol-alist nil)
         (org-tasklet-protocols '("tasklet-capture"))

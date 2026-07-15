@@ -61,7 +61,11 @@
 (defun org-tasklet--read-organize-type ()
   "读取当前条目的整理分类。"
   (let* ((default "Action")
-         (label (completing-read "分类当前 item: "
+         (title (org-get-heading t t t t))
+         (prompt (if (and title (not (string-empty-p title)))
+                     (format "分类当前 item「%s」: " title)
+                   "分类当前 item: "))
+         (label (completing-read prompt
                                   (org-tasklet--organize-labels)
                                   nil t nil nil default)))
     (org-tasklet--organize-type-by-label label)))
@@ -335,28 +339,86 @@
   (org-tasklet--refresh-mode-line-if-present)
   (message "已加入项目"))
 
+(defun org-tasklet--triage-one-item (type tags project-marker interactivep)
+  "按分类整理当前 inbox item 的一次性处理核心。
+
+TYPE 为 nil 时交互选择分类；TAGS 非 nil 时直接设置 tags；
+PROJECT-MARKER 用于非交互地指定 Add to Project 的目标项目；
+INTERACTIVEP 非 nil 时使用 Org 自带 tags 编辑命令。"
+  (org-tasklet--ensure-current-inbox-item)
+  (let ((selected-type (or (org-tasklet--normalize-organize-type type)
+                           (org-tasklet--read-organize-type))))
+    (org-tasklet--organize-entry selected-type)
+    (org-tasklet--apply-current-tags tags interactivep)
+    (pcase selected-type
+      ('project-task
+       (org-tasklet--move-current-item-to-project
+        (or project-marker
+            (org-tasklet--read-project-marker))))
+      ((guard (plist-get (org-tasklet--organize-entry-plist selected-type)
+                         :archive))
+       (org-tasklet--archive-current-item-after-type selected-type))
+      (_
+       (org-tasklet--move-current-item-to-type selected-type)))))
+
+(defun org-tasklet--goto-next-inbox-item (&optional pos)
+  "把光标定位到 POS（默认当前位置）之后最近的条目标题。
+
+光标已在标题行时停在该标题。找到时返回 point，否则返回 nil。"
+  (goto-char (or pos (point)))
+  (beginning-of-line)
+  (cond
+   ((org-at-heading-p) (point))
+   ((re-search-forward org-heading-regexp nil t)
+    (org-back-to-heading t)
+    (point))
+   (t nil)))
+
+(defun org-tasklet-triage-items ()
+  "从当前 item 开始连续整理 inbox 条目。
+
+当前 buffer 不是 inbox 时，先打开 inbox 并跳到第一个 item。
+每处理完一个 item 自动激活下一个，处理完末尾后回到开头补漏，
+直到全部处理完；C-g 随时退出。"
+  (interactive)
+  (if (org-tasklet-inbox-buffer-p)
+      ;; 光标在某个条目正文里时，从该条目开始处理。
+      (unless (org-before-first-heading-p)
+        (org-back-to-heading t))
+    (find-file (org-tasklet--ensure-file (org-tasklet-inbox-file) "Inbox"))
+    (org-mode)
+    (org-tasklet--show-all)
+    (goto-char (point-min)))
+  (let ((processed 0))
+    (condition-case nil
+        (progn
+          (while (or (org-tasklet--goto-next-inbox-item)
+                     ;; 从中间条目开始时，处理完末尾后回到开头补漏。
+                     (org-tasklet--goto-next-inbox-item (point-min)))
+            (let ((resume (copy-marker (point))))
+              ;; 整理会删除当前子树；marker 随后正好落在下一个条目开头。
+              (unwind-protect
+                  (org-tasklet--triage-one-item nil nil nil t)
+                (goto-char resume)
+                (set-marker resume nil)))
+            (setq processed (1+ processed)))
+          (message "inbox 整理完成，共处理 %d 个 item" processed))
+      (quit
+       (message "已退出 inbox 整理，共处理 %d 个 item" processed)))))
+
 (defun org-tasklet-triage-current-item (&optional type tags project-marker)
   "按分类整理当前 inbox item。
 
-TYPE 为 nil 时交互选择分类；TAGS 非 nil 时直接设置 tags；
-PROJECT-MARKER 用于非交互地指定 Add to Project 的目标项目。"
+交互调用时进入连续整理：当前 buffer 不是 inbox 会先打开 inbox 并跳到
+第一个 item；每处理完一个自动激活下一个，直到全部处理完或 C-g 退出。
+Lisp 调用时只处理当前 item：TYPE 为 nil 时交互选择分类；TAGS 非 nil
+时直接设置 tags；PROJECT-MARKER 用于非交互地指定 Add to Project 的目
+标项目。"
   (interactive)
   (let ((interactivep (called-interactively-p 'interactive)))
-    (org-tasklet--ensure-current-inbox-item)
-    (let ((selected-type (or (org-tasklet--normalize-organize-type type)
-                             (org-tasklet--read-organize-type))))
-      (org-tasklet--organize-entry selected-type)
-      (org-tasklet--apply-current-tags tags interactivep)
-      (pcase selected-type
-        ('project-task
-         (org-tasklet--move-current-item-to-project
-          (or project-marker
-              (org-tasklet--read-project-marker))))
-        ((guard (plist-get (org-tasklet--organize-entry-plist selected-type)
-                           :archive))
-         (org-tasklet--archive-current-item-after-type selected-type))
-        (_
-         (org-tasklet--move-current-item-to-type selected-type))))))
+    (if (and interactivep (not (or type tags project-marker)))
+        (org-tasklet-triage-items)
+      (org-tasklet--triage-one-item type tags project-marker interactivep))))
 
 (defun org-tasklet-triage-move-to-tasks ()
   "把当前 inbox 条目作为 Action 移动到 tasks 文件。"

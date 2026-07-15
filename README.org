@@ -105,8 +105,16 @@ make measure
 * inbox 整理
 
 默认打开 ~inbox.org~ 时保持普通 Org 编辑体验，不接管字符键。
-需要处理条目时，把光标放在该 Org subtree 的标题或正文里，调用 ~M-x org-tasklet-triage-current-item~ 。
-该命令只处理当前 item，随后立即结束，不保留额外状态，也不会进入线性 process 流程。
+
+交互调用 ~M-x org-tasklet-triage-current-item~ 进入连续整理：
+
+- 当前 buffer 不是 inbox 时，自动打开 inbox 并跳到第一个 item。
+- 已经在 inbox 内时，从光标所在的 item 开始处理。
+- 每处理完一个 item 自动激活下一个；从中间开始时处理完末尾后回到开头补漏。
+- 直到全部 item 处理完成，或随时用 ~C-g~ 退出。
+
+连续整理只存在于单次命令的执行期间，不保留跨命令状态。
+Lisp 调用（传入分类参数）时只处理当前 item。
 
 整理流程参考 org-gtd 的分类语义，但只使用 Org 原生结构：
 

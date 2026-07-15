@@ -40,7 +40,9 @@ M-x org-tasklet-triage
   打开 inbox.org。
 
 M-x org-tasklet-triage-current-item
-  在当前 inbox item 上选择分类并整理当前条目。
+  在当前 inbox item 上选择分类并整理。交互调用会进入连续整理：
+  不在 inbox 时先打开 inbox 并跳到第一个 item，处理完一个自动激活
+  下一个，直到全部完成或 C-g 退出。
 
 M-x org-tasklet-engage
   打开 agenda 总览。
@@ -193,6 +195,7 @@ Trash
 (autoload 'org-tasklet-agenda-todo-dwim "org-tasklet-agenda" nil t)
 (autoload 'org-tasklet-triage "org-tasklet-triage" nil t)
 (autoload 'org-tasklet-triage-current-item "org-tasklet-triage" nil t)
+(autoload 'org-tasklet-triage-items "org-tasklet-triage" nil t)
 (autoload 'org-tasklet-archive-done "org-tasklet-archive" nil t)
 (autoload 'org-tasklet-archive-subtree "org-tasklet-archive" nil t)
 (autoload 'org-tasklet-register-org-protocol "org-tasklet-protocol" nil t)
